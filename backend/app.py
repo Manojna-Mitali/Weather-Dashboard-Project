@@ -10,12 +10,9 @@ app = Flask(__name__, static_folder="../frontend")
 CORS(app)
 
 # ----- OpenWeather API key -----
-OPENWEATHER_API_KEY = "1c4819e272c6555cc7f51f56418b835d"  # Replace with your actual key
+OPENWEATHER_API_KEY = "1c4819e272c6555cc7f51f56418b835d"
 
-# ===============================
-# 🔹 Helper Functions
-# ===============================
-
+# ----- Helper functions -----
 def get_current_weather(city):
     url = "https://api.openweathermap.org/data/2.5/weather"
     params = {"q": city, "appid": OPENWEATHER_API_KEY, "units": "metric"}
@@ -38,7 +35,8 @@ def get_current_weather(city):
         "lat": data["coord"]["lat"],
         "lon": data["coord"]["lon"],
         "sunrise": data["sys"]["sunrise"],
-        "sunset": data["sys"]["sunset"]
+        "sunset": data["sys"]["sunset"],
+        "timezone": data["timezone"],
     }
 
 def get_forecast(city):
@@ -48,7 +46,7 @@ def get_forecast(city):
     r.raise_for_status()
     data = r.json()
 
-    # Hourly forecast (next 12 intervals)
+    # Hourly forecast
     hourly = [{
         "time": item["dt_txt"].split(" ")[1][:5],
         "temp": item["main"]["temp"],
@@ -57,7 +55,7 @@ def get_forecast(city):
         "weather": item["weather"][0]["main"]
     } for item in data["list"][:12]]
 
-    # Daily forecast (7 days)
+    # Daily forecast
     daily = {}
     for item in data["list"]:
         date = item["dt_txt"].split(" ")[0]
@@ -79,7 +77,6 @@ def get_forecast(city):
             "temp_max": vals["temp_max"],
             "icon": vals["icon"]
         })
-
     return hourly, daily_list
 
 def get_air_quality(lat, lon):
@@ -94,31 +91,27 @@ def get_air_quality(lat, lon):
         return {"aqi": aqi, "components": components}
     return {}
 
-def get_uv_index(lat, lon):
-    """Fetch UV index for the given coordinates"""
-    url = "https://api.openweathermap.org/data/2.5/uvi"
-    params = {"lat": lat, "lon": lon, "appid": OPENWEATHER_API_KEY}
-    r = requests.get(url, params=params)
-    if r.status_code == 200:
-        data = r.json()
-        return {"uv_index": data.get("value")}
-    return {}
-
+# ✅ Motivational, warm suggestions
 def get_suggestions(weather, temp):
-    weather = weather.lower()
-    if weather in ["rain", "drizzle", "thunderstorm"]:
-        return "Take umbrella ☂️"
-    elif weather == "snow":
-        return "Wear warm clothes ❄️"
+    w = weather.lower()
+    if w in ["rain", "drizzle", "thunderstorm"]:
+        return "Rain brings freshness 🌧 — take an umbrella and maybe dance a little in it."
+    elif w == "snow":
+        return "It's snowing ❄️ — grab a warm drink and soak in the calm beauty of winter."
+    elif "mist" in w or "fog" in w or "haze" in w:
+        return "It’s a little misty outside 🌫 — slow down, breathe deep, let the day unfold gently."
     elif temp > 35:
-        return "Stay hydrated 🥵"
+        return "It's quite hot 🥵 — stay hydrated, wear light clothes, and take breaks often."
+    elif temp < 10:
+        return "Chilly winds today 🧣 — stay warm, but don’t forget to step out and feel alive."
+    elif w == "clouds":
+        return "The sky’s overcast ☁️ — sometimes calm gray days are perfect for reflection."
+    elif w == "clear":
+        return "The sun’s smiling ☀️ — perfect time to step outside, move a little, or just enjoy the breeze."
     else:
-        return "Good to go outside 🙂. Have a nice day <3"
+        return "Good to go outside 🙂. Take kindness with you — it looks good on everyone."
 
-# ===============================
-# 🔹 API Routes
-# ===============================
-
+# ----- API Route -----
 @app.route("/api/weather")
 def weather_api():
     city = request.args.get("city")
@@ -129,22 +122,21 @@ def weather_api():
         current = get_current_weather(city)
         hourly, daily = get_forecast(city)
         air = get_air_quality(current["lat"], current["lon"])
-        uv_data = get_uv_index(current["lat"], current["lon"])
         suggestion = get_suggestions(current["weather"], current["temp"])
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
     response = {
         "current": current,
         "hourly": hourly,
         "daily": daily,
         "air_quality": air,
-        "uv": uv_data,
         "suggestion": suggestion,
         "map": {"lat": current["lat"], "lon": current["lon"]}
     }
-
-    # ✅ Log the data in DynamoDB
+    
+# ✅ Log the data in DynamoDB
     save_weather(
         city=current['city'],
         temp=current['temp'],
@@ -153,35 +145,12 @@ def weather_api():
         suggestion=suggestion
     )
 
-    # ✅ Upload weather summary to S3
     upload_to_s3(data=response, city=current['city'])
-
     return jsonify(response)
-
-@app.route("/api/suggest")
-def suggest():
-    """City name suggestions for search dropdown"""
-    query = request.args.get("q", "")
-    if not query:
-        return jsonify([])
-    try:
-        url = "https://geodb-free-service.wirefreethought.com/v1/geo/cities"
-        params = {"namePrefix": query, "limit": 5}
-        r = requests.get(url, params=params)
-        r.raise_for_status()
-        data = r.json()
-        suggestions = [city["city"] for city in data["data"]]
-        return jsonify(suggestions)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/health")
 def health():
     return jsonify({"status": "ok"})
-
-# ===============================
-# 🔹 Serve Frontend
-# ===============================
 
 @app.route("/")
 def home():
@@ -190,10 +159,6 @@ def home():
 @app.route("/<path:path>")
 def static_proxy(path):
     return send_from_directory(app.static_folder, path)
-
-# ===============================
-# 🔹 Run Flask App
-# ===============================
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

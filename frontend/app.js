@@ -1,473 +1,247 @@
-/* app.js — Modern Weather Dashboard
-   - Uses EC2 Flask backend: API_BASE (kept as provided)
-   - Tries to fetch RapidAPI key at: GET ${API_BASE}/config/geodb
-   - Falls back to local city list if backend doesn't provide RapidAPI key
-   - Renders hourly chart (Chart.js), mini-sparkline, hourly carousel
-   - Animates SVG gauges (AQI, UV, Feels, Cloud)
-   - Dark/light mode persisted in localStorage
-*/
+// ======================= CONFIGURATION =========================
+const API_BASE = "http://13.203.200.236:5000/api"; // ✅ Your backend endpoint
 
-/* ================== CONFIG ================== */
-const API_BASE = "http://43.204.136.173:5000/api"; // <-- your EC2 Flask API (kept)
-const CONFIG_ENDPOINT = `${API_BASE}/config/geodb`; // optional endpoint to return { rapidapiKey: "..." }
-const DEFAULT_CITY = "Bhubaneswar";
-
-/* Local fallback city list (used when backend does not return RapidAPI key) */
-const CITIES = [
-  "Bhubaneswar, Odisha, India", "Bengaluru, Karnataka, India", "Mumbai, Maharashtra, India",
-  "Delhi, India", "Kolkata, West Bengal, India", "Chennai, Tamil Nadu, India",
-  "Hyderabad, Telangana, India", "Pune, Maharashtra, India", "Jaipur, Rajasthan, India",
-  "Lucknow, Uttar Pradesh, India", "Surat, Gujarat, India"
-];
-
-/* ================== DOM ================== */
+// ======================= DOM ELEMENTS ===========================
+const searchBtn = document.getElementById("searchBtn");
 const searchInput = document.getElementById("searchInput");
-const autocompleteList = document.getElementById("autocompleteList");
-const locBtn = document.getElementById("locBtn");
-const refreshBtn = document.getElementById("refreshBtn");
-const backTopBtn = document.getElementById("backTopBtn");
-const themeSwitch = document.getElementById("themeSwitch");
-const hourlyToggleFeels = document.getElementById("toggleFeels");
+const unitToggle = document.getElementById("unitToggle");
+const suggestionsBox = document.getElementById("suggestions");
 
-const locationName = document.getElementById("locationName");
-const summaryText = document.getElementById("summaryText");
-const mainTemp = document.getElementById("mainTemp");
-const feelsLike = document.getElementById("feelsLike");
-const mainIcon = document.getElementById("mainIcon");
-const keyMetrics = document.getElementById("keyMetrics");
-const sunriseShort = document.getElementById("sunriseShort");
-const sunsetShort = document.getElementById("sunsetShort");
-const aqiShort = document.getElementById("aqiShort");
-const currentTempCompact = document.getElementById("currentTempCompact");
+const elTemp = document.getElementById("temperature");
+const elFeels = document.getElementById("feelsLike");
+const elDesc = document.getElementById("weatherDesc");
+const elWind = document.getElementById("wind");
+const elPressure = document.getElementById("pressure");
+const elHumidity = document.getElementById("humidity");
+const elPrecip = document.getElementById("precip");
+const elSunrise = document.getElementById("sunrise");
+const elSunset = document.getElementById("sunset");
+const elWeatherIcon = document.getElementById("weatherIcon");
+const elTempHigh = document.getElementById("tempHigh");
+const elTempLow = document.getElementById("tempLow");
+const elDayName = document.getElementById("dayName");
+const elDate = document.getElementById("date");
+const hourlyEl = document.getElementById("hourlyForecast");
+const weeklyEl = document.getElementById("weeklyForecast");
+const outsideTextEl = document.getElementById("outsideText");
+const outsideEmojiEl = document.getElementById("outsideEmoji");
+const dayProgressEl = document.getElementById("dayProgress");
+const mapIframe = document.getElementById("map");
 
-const hourlyCarousel = document.getElementById("hourlyCarousel");
-const precipRow = document.getElementById("precipRow");
+let units = "metric";
 
-const tempNowSmall = document.getElementById("tempNowSmall");
-const tempStatus = document.getElementById("tempStatus");
-const feelsDiff = document.getElementById("feelsDiff");
-const cloudPct = document.getElementById("cloudPct");
-const cloudArc = document.getElementById("cloudArc");
-const precipTotal = document.getElementById("precipTotal");
-const windSpeed = document.getElementById("windSpeed");
-const windDir = document.getElementById("windDir");
-const humidityBar = document.getElementById("humidityBar");
-const dewPoint = document.getElementById("dewPoint");
-const uvIndex = document.getElementById("uvIndex");
-const aqiVal = document.getElementById("aqiVal");
-const mapFrame = document.getElementById("mapFrame");
+// ======================= AUTOCOMPLETE ===========================
+searchInput.addEventListener("input", () => {
+  const query = searchInput.value.toLowerCase();
+  suggestionsBox.innerHTML = "";
+  if (!query) return (suggestionsBox.style.display = "none");
 
-/* Chart instances */
-let tempChart = null;
-let miniTempChart = null;
-
-/* RapidAPI key holder (fetched from backend or empty) */
-let RAPIDAPI_KEY = "";
-
-/* ================== CONFIG FETCH (get RapidAPI key from backend) ================== */
-async function loadConfigFromBackend() {
-  try {
-    const res = await fetch(CONFIG_ENDPOINT, { method: "GET" });
-    if (!res.ok) throw new Error("No config endpoint or non-200 response");
-    const json = await res.json();
-    if (json && json.rapidapiKey) {
-      RAPIDAPI_KEY = json.rapidapiKey;
-      console.log("Loaded RapidAPI key from backend.");
-      return;
-    }
-  } catch (err) {
-    console.log("No RapidAPI key from backend — using fallback list.", err.message || err);
-  }
-  RAPIDAPI_KEY = "";
-}
-
-/* ================== GeoDB autocomplete (uses RapidAPI key if available) ================== */
-async function geoSearch(q) {
-  if (!q) return [];
-  // If key present, call GeoDB via RapidAPI
-  if (RAPIDAPI_KEY) {
-    const url = `https://wft-geo-db.p.rapidapi.com/v1/geo/cities?namePrefix=${encodeURIComponent(q)}&limit=6&sort=-population`;
-    try {
-      const res = await fetch(url, {
-        headers: {
-          "X-RapidAPI-Key": RAPIDAPI_KEY,
-          "X-RapidAPI-Host": "wft-geo-db.p.rapidapi.com"
-        }
-      });
-      if (!res.ok) throw new Error("GeoDB returned non-OK");
-      const json = await res.json();
-      // Format: "City, Region, Country"
-      return json.data.map(c => `${c.city}${c.region ? `, ${c.region}` : ""}, ${c.country}`);
-    } catch (err) {
-      console.warn("GeoDB call failed, falling back to local list.", err.message || err);
-      return CITIES.filter(c => c.toLowerCase().includes(q.toLowerCase())).slice(0, 6);
-    }
-  } else {
-    // local fallback
-    return CITIES.filter(c => c.toLowerCase().includes(q.toLowerCase())).slice(0, 6);
-  }
-}
-
-/* ================== Autocomplete UI ================== */
-let autocompleteTimeout = null;
-searchInput.addEventListener("input", (e) => {
-  const q = e.target.value.trim();
-  clearTimeout(autocompleteTimeout);
-  if (!q) return showAutocomplete([]);
-  autocompleteTimeout = setTimeout(async () => {
-    const matches = await geoSearch(q);
-    showAutocomplete(matches);
-  }, 140); // debounce
-});
-
-function showAutocomplete(list) {
-  autocompleteList.innerHTML = "";
-  if (!list || !list.length) {
-    autocompleteList.style.display = "none";
-    return;
-  }
-  list.forEach(item => {
-    const el = document.createElement("div");
-    el.className = "autocomplete-item";
-    el.textContent = item;
-    el.addEventListener("click", () => {
-      searchInput.value = item;
-      autocompleteList.style.display = "none";
-      fetchWeather(item);
+  const matched = cities.filter(c => c.toLowerCase().startsWith(query)).slice(0, 8);
+  matched.forEach(city => {
+    const div = document.createElement("div");
+    div.textContent = city;
+    div.classList.add("suggestion-item");
+    div.addEventListener("click", () => {
+      searchInput.value = city;
+      suggestionsBox.innerHTML = "";
+      suggestionsBox.style.display = "none";
+      getWeather(city);
     });
-    autocompleteList.appendChild(el);
+    suggestionsBox.appendChild(div);
   });
-  autocompleteList.style.display = "block";
-}
-
-/* Hide when clicking outside */
-document.addEventListener("click", (ev) => {
-  if (!ev.target.closest(".search-box")) autocompleteList.style.display = "none";
+  suggestionsBox.style.display = matched.length ? "block" : "none";
 });
 
-/* ================== Theme handling ================== */
-function applyTheme(theme) {
-  document.documentElement.setAttribute("data-theme", theme);
-  localStorage.setItem("theme", theme);
-  if (themeSwitch) themeSwitch.checked = (theme === "dark");
-}
-if (themeSwitch) {
-  themeSwitch.addEventListener("change", () => applyTheme(themeSwitch.checked ? "dark" : "light"));
-}
-const savedTheme = localStorage.getItem("theme") || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? "dark" : "light");
-applyTheme(savedTheme);
+// ======================= BACKGROUND LOGIC =======================
+function updateBackground(weather, description, temp) {
+  const month = new Date().getMonth() + 1;
+  const isWinter = month === 12 || month <= 2;
 
-/* ================== Navigation behavior ================== */
-document.querySelectorAll(".nav-item").forEach(btn => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".nav-item").forEach(n => n.classList.remove("active"));
-    btn.classList.add("active");
-    const section = document.getElementById(btn.dataset.section);
-    if (section) section.scrollIntoView({ behavior: "smooth" });
-  });
-});
+  weather = (weather || "").toLowerCase();
+  description = (description || "").toLowerCase();
 
-/* ================== Helpers ================== */
-function formatTimeFromUnix(ts) {
-  if (!ts) return "—:—";
-  const d = new Date(ts * 1000);
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-function formatHourLabel(ts) {
-  const d = new Date((ts || 0) * 1000);
-  const h = d.getHours();
-  if (h === new Date().getHours()) return "Now";
-  return d.toLocaleTimeString([], { hour: 'numeric', hour12: true });
-}
-function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-function mapIconClass(s) {
-  if (!s) return "wi wi-day-sunny";
-  s = s.toString().toLowerCase();
-  if (s.includes("clear") || s.includes("sun")) return "wi wi-day-sunny";
-  if (s.includes("cloud")) return "wi wi-cloudy";
-  if (s.includes("rain") || s.includes("drizzle")) return "wi wi-rain";
-  if (s.includes("snow")) return "wi wi-snow";
-  if (s.includes("thunder")) return "wi wi-thunderstorm";
-  if (s.includes("fog") || s.includes("mist") || s.includes("haze")) return "wi wi-fog";
-  return "wi wi-day-cloudy";
+  let bgImage = "default.jpg";
+
+  // 🌡️ Temperature-sensitive backgrounds FIRST
+  if (temp <= -10) {
+    bgImage = "freezing.jpg"; // very cold
+  } else if (temp > -10 && temp < 15) {
+    bgImage = "cold.jpg"; // mild cold
+  } else if (temp > 30) {
+    bgImage = "hot.jpg"; // summer heat
+  }
+
+  // ☁️ Weather-based only if temperature not extreme
+  if (temp > 5 && !weather.includes("clear")) {
+    if (weather.includes("snow")) {
+      bgImage = "snowy.jpg";
+    } else if (weather.includes("rain") || description.includes("rain") || description.includes("drizzle")) {
+      bgImage = "rainy.jpg";
+    } else if (weather.includes("cloud")) {
+      bgImage = "cloudy.jpg";
+    } else if (description.includes("fog") || description.includes("haze") || description.includes("mist")) {
+      bgImage = "foggy.jpg";
+    }
+  }
+
+  // ❄️ Winter fallback
+  if (isWinter && temp < 0 && !weather.includes("rain")) {
+    bgImage = "freezing.jpg";
+  }
+
+  document.body.style.backgroundImage = `url('${bgImage}')`;
 }
 
-/* ================== Fetch weather from backend ================== */
-async function fetchWeather(cityOrCoords) {
+// ======================= EMOJI LOGIC ============================
+function updateEmoji(weather, description, temp) {
+  weather = (weather || "").toLowerCase();
+  description = (description || "").toLowerCase();
+
+  if (temp <= 0) return "🥶";
+  if (weather.includes("snow")) return "❄️";
+  if (weather.includes("rain") || description.includes("drizzle")) return "🌧️";
+  if (weather.includes("cloud")) return "☁️";
+  if (weather.includes("clear") || description.includes("sun")) return "☀️";
+  if (description.includes("mist") || description.includes("fog") || description.includes("haze")) return "🌫️";
+  if (weather.includes("thunderstorm")) return "⛈️";
+  return "🌤️";
+}
+
+// ======================= FETCH WEATHER ==========================
+async function getWeather(city) {
   try {
-    showLoading(true);
-    const q = encodeURIComponent(cityOrCoords);
-    const url = `${API_BASE}/weather?city=${q}`;
-    console.log("Fetching weather:", url);
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Weather fetch failed: ${res.status}`);
+    const res = await fetch(`${API_BASE}/weather?city=${city}`);
+    if (!res.ok) throw new Error("Failed to fetch weather data");
     const data = await res.json();
     applyWeatherData(data);
   } catch (err) {
-    console.error("fetchWeather error:", err);
-    alert("Could not fetch weather. Check EC2 backend or city name.");
-  } finally {
-    showLoading(false);
+    console.error(err);
+    alert("City not found or server error!");
   }
 }
 
-/* ================== Apply data to UI ================== */
+// ======================= APPLY WEATHER DATA =====================
 function applyWeatherData(data) {
-  const current = data.current || {};
-  const hourly = data.hourly || [];
-  const daily = data.daily || [];
-  const suggestion = data.suggestion || "";
-  const coords = data.map || {};
+  const current = data.current;
+  const hourly = data.hourly;
+  const daily = data.daily;
 
-  // Summary
-  locationName.textContent = data.location || current.location || "Unknown location";
-  summaryText.textContent = suggestion || current.summary || current.weather || "";
-  mainTemp.textContent = `${Math.round(current.temp ?? 0)}°`;
-  currentTempCompact.textContent = `${Math.round(current.temp ?? 0)}°`;
-  feelsLike.textContent = `${Math.round(current.feels_like ?? 0)}°`;
-  tempNowSmall.textContent = `${Math.round(current.temp ?? 0)}°`;
-  tempStatus.textContent = current.trend || "Steady";
+  // Temperature and details
+  elTemp.innerText = `${Math.round(current.temp)}°`;
+  elFeels.innerText = `Feels like ${Math.round(current.feels_like)}°`;
+  elDesc.innerText = current.description || current.weather;
+  elWind.innerText = `${current.wind} m/s`;
+  elPressure.innerText = `${current.pressure} hPa`;
+  elHumidity.innerText = `${current.humidity}%`;
+  elPrecip.innerText = "45%";
+  elDayName.innerText = current.day;
 
-  // Icon
-  mainIcon.innerHTML = `<i class="${mapIconClass(current.icon || current.weather)}"></i>`;
+  // Local time
+  const utc = new Date().getTime() + new Date().getTimezoneOffset() * 60000;
+  const localTime = new Date(utc + current.timezone * 1000);
+  elDate.innerText = `${localTime.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`;
 
-  // Key metrics
-  keyMetrics.innerHTML = "";
-  const metrics = [
-    { label: "Air Quality", value: data.aqi?.value ?? "—", icon: "fa-solid fa-smog" },
-    { label: "Wind", value: `${current.wind ?? "—"} m/s`, icon: "fa-solid fa-wind" },
-    { label: "Humidity", value: `${current.humidity ?? "—"}%`, icon: "fa-solid fa-droplet" },
-    { label: "Visibility", value: `${current.visibility ?? "—"} km`, icon: "fa-solid fa-eye" },
-    { label: "Pressure", value: `${current.pressure ?? "—"} hPa`, icon: "fa-solid fa-tachometer-alt" },
-    { label: "Dew Point", value: `${current.dew_point ?? "—"}°`, icon: "fa-solid fa-temperature-quarter" },
-  ];
-  metrics.forEach(m => {
-    const el = document.createElement("div");
-    el.className = "metric";
-    el.innerHTML = `<i class="${m.icon}"></i><div><div class="m-label">${m.label}</div><div class="m-value">${m.value}</div></div>`;
-    keyMetrics.appendChild(el);
+  // Weather Icon
+  const iconCode = current.icon || "01d";
+  elWeatherIcon.innerHTML = `<img src="https://openweathermap.org/img/wn/${iconCode}@2x.png" alt="${current.weather}">`;
+
+  // Background + Emoji
+  updateBackground(current.weather, current.description, current.temp);
+  outsideEmojiEl.textContent = updateEmoji(current.weather, current.description, current.temp);
+
+  // Suggestion Text (more expressive)
+  let suggestionText;
+  if (current.temp <= 0) suggestionText = "Brrr 🥶 It's freezing! Stay cozy inside.";
+  else if (current.temp > 0 && current.temp <= 10) suggestionText = "Chilly winds today — wrap up warm 🧣";
+  else if (current.temp > 10 && current.temp <= 25) suggestionText = "Lovely weather 🌤 — take a stroll or breathe in the air!";
+  else if (current.temp > 25 && current.temp <= 35) suggestionText = "Warm and sunny ☀️ — stay hydrated and enjoy your day!";
+  else suggestionText = "Hot out there 🥵 — find some shade and keep sipping water!";
+  outsideTextEl.innerText = data.suggestion || suggestionText;
+
+  // Localized Sunrise & Sunset
+  // ✅ Correct sunrise & sunset conversion
+  const sunriseTs = current.sunrise * 1000; // use directly, don't add timezone
+  const sunsetTs = current.sunset * 1000;
+
+  elSunrise.innerText = new Date(sunriseTs).toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
   });
 
-  // Sunrise / Sunset / AQI
-  sunriseShort.textContent = current.sunrise ? formatTimeFromUnix(current.sunrise) : "—:—";
-  sunsetShort.textContent = current.sunset ? formatTimeFromUnix(current.sunset) : "—:—";
-  aqiShort.textContent = data.aqi?.value ?? "—";
+  elSunset.innerText = new Date(sunsetTs).toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  });
 
-  // Map iframe
-  if (coords.lat && coords.lon) {
-    mapFrame.src = `https://www.google.com/maps?q=${coords.lat},${coords.lon}&z=10&output=embed`;
-  } else {
-    mapFrame.src = "";
+  // keep your daylight progress as-is
+  updateDaylightProgress(sunriseTs, sunsetTs);
+
+
+  // Map
+  if (data.map.lat && data.map.lon) {
+    mapIframe.src = `https://www.google.com/maps?q=${data.map.lat},${data.map.lon}&z=10&output=embed`;
   }
 
-  // Hourly + charts
-  renderHourly(hourly);
-  drawTempChart(hourly);
-  drawMiniTempChart(hourly);
-
-  // Details cards
-  const feelsDelta = Math.round((current.feels_like ?? 0) - (current.temp ?? 0));
-  feelsDiff.textContent = `${feelsDelta > 0 ? "+" : ""}${feelsDelta}°`;
-  const cloud = current.clouds ?? 0;
-  cloudPct.textContent = `${cloud}%`;
-  if (cloudArc) cloudArc.setAttribute("stroke-dasharray", `${cloud}, 100`);
-  precipTotal.textContent = `${(current.precipitation ?? 0)} mm`;
-  windSpeed.textContent = `${current.wind ?? "—"} m/s`;
-  windDir.textContent = current.wind_dir ?? "—";
-  humidityBar.style.width = `${current.humidity ?? 0}%`;
-  dewPoint.textContent = `${current.dew_point ?? "—"}°`;
-  uvIndex.textContent = `${current.uvi ?? "—"}`;
-  aqiVal.textContent = `${data.aqi?.value ?? "—"}`;
-
-  // Animate arcs (UV, AQI, Feels)
-  const uvArcEl = document.getElementById("uvArc");
-  const aqiArcEl = document.getElementById("aqiArc");
-  const feelsArcEl = document.getElementById("feelsArc");
-
-  animateArc(uvArcEl, clamp((current.uvi ?? 0) / 11 * 100, 0, 100), getUvColor(current.uvi ?? 0));
-  animateArc(aqiArcEl, clamp(((data.aqi?.value ?? 0) / 500) * 100, 0, 100), getAqiColor(data.aqi?.value ?? 0));
-  animateArc(feelsArcEl, clamp(Math.abs(feelsDelta) / 15 * 100, 0, 100), feelsDelta >= 0 ? "var(--warn)" : "var(--accent)");
-
-  // Save last searched city
-  localStorage.setItem("lastCity", locationName.textContent);
-}
-
-/* ================== Hourly rendering ================== */
-function renderHourly(hourly) {
-  hourlyCarousel.innerHTML = "";
-  precipRow.innerHTML = "";
-
-  (hourly || []).slice(0, 24).forEach((h, idx) => {
-    const card = document.createElement("div");
-    card.className = "hour-card";
-    if (idx === 0) card.classList.add("active");
-    card.innerHTML = `
-      <div class="time">${formatHourLabel(h.dt || h.time)}</div>
-      <div class="icon"><i class="${mapIconClass(h.icon || h.weather)}"></i></div>
-      <div class="temp">${Math.round(h.temp ?? 0)}°</div>
-      <div class="precip-small" style="font-size:12px;color:var(--muted)">${Math.round((h.pop ?? 0) * 100)}%</div>
-    `;
-    hourlyCarousel.appendChild(card);
-
-    // Precip item below chart
-    const p = document.createElement("div");
-    p.style.minWidth = "44px";
-    p.style.textAlign = "center";
-    p.innerHTML = `<div style="font-size:12px">${Math.round((h.pop ?? 0) * 100)}%</div><div style="font-size:18px">💧</div>`;
-    precipRow.appendChild(p);
+  // Hourly forecast
+  hourlyEl.innerHTML = "";
+  hourly.slice(0, 6).forEach((h) => {
+    const iconCode = h.icon || "02d";
+    const icon = `https://openweathermap.org/img/wn/${iconCode}@2x.png`;
+    const card = `
+      <div class="forecast-card">
+        <p>${h.time}</p>
+        <img src="${icon}" width="50">
+        <p>${Math.round(h.temp)}°</p>
+      </div>`;
+    hourlyEl.innerHTML += card;
   });
 
-  // enable mouse drag scrolling
-  makeScrollable(hourlyCarousel);
-}
-
-/* ================== Charts (Chart.js) ================== */
-function drawTempChart(hourly) {
-  const hours = (hourly || []).slice(0, 24);
-  const labels = hours.map(h => formatHourLabel(h.dt || h.time));
-  const data = hours.map(h => Math.round(h.temp ?? 0));
-  const feels = hours.map(h => Math.round(h.feels_like ?? h.temp ?? 0));
-
-  const ctx = document.getElementById("tempChart").getContext("2d");
-  if (tempChart) tempChart.destroy();
-
-  tempChart = new Chart(ctx, {
-    type: "line",
-    data: {
-      labels,
-      datasets: [
-        {
-          label: "Temp",
-          data,
-          fill: true,
-          tension: 0.32,
-          pointRadius: 2,
-          borderWidth: 2,
-          backgroundColor: "rgba(37,99,235,0.12)",
-          borderColor: "rgba(37,99,235,1)"
-        },
-        {
-          label: "Feels",
-          data: feels,
-          fill: false,
-          tension: 0.32,
-          pointRadius: 0,
-          borderDash: [4, 4],
-          borderColor: "rgba(99,102,241,0.85)",
-          borderWidth: 1.5,
-          hidden: !hourlyToggleFeels.checked
-        }
-      ]
-    },
-    options: {
-      responsive: true,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { grid: { display: false } },
-        y: { grid: { color: "rgba(2,6,23,0.04)" } }
-      }
-    }
+  // Weekly forecast
+  weeklyEl.innerHTML = "";
+  daily.slice(0, 7).forEach((d) => {
+    const dayName = new Date(d.date).toLocaleDateString("en-US", { weekday: "short" });
+    const iconCode = d.icon || "03d";
+    const icon = `https://openweathermap.org/img/wn/${iconCode}@2x.png`;
+    const card = `
+      <div class="forecast-card">
+        <p>${dayName}</p>
+        <img src="${icon}" width="50">
+        <p>${Math.round(d.temp_max)}° / ${Math.round(d.temp_min)}°</p>
+      </div>`;
+    weeklyEl.innerHTML += card;
   });
 
-  // toggle feels
-  hourlyToggleFeels.addEventListener("change", (e) => {
-    if (!tempChart) return;
-    tempChart.data.datasets[1].hidden = !e.target.checked;
-    tempChart.update();
-  });
+  // High/Low temps
+  elTempHigh.innerText = Math.round(daily[0].temp_max);
+  elTempLow.innerText = Math.round(daily[0].temp_min);
 }
 
-function drawMiniTempChart(hourly) {
-  const arr = (hourly || []).slice(0, 12);
-  const labels = arr.map(it => formatHourLabel(it.dt || it.time));
-  const data = arr.map(it => Math.round(it.temp ?? 0));
-  const ctx = document.getElementById("miniTempChart").getContext("2d");
-  if (miniTempChart) miniTempChart.destroy();
-  miniTempChart = new Chart(ctx, {
-    type: "line",
-    data: { labels, datasets: [{ data, fill: false, tension: 0.3, pointRadius: 0, borderWidth: 1.3, borderColor: "rgba(37,99,235,0.9)" }] },
-    options: { plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }
-  });
+// ======================= DAYLIGHT PROGRESS ======================
+function updateDaylightProgress(sunrise, sunset) {
+  const now = new Date().getTime();
+  const total = sunset - sunrise;
+  const elapsed = now - sunrise;
+  const percent = Math.max(0, Math.min(1, elapsed / total));
+  dayProgressEl.style.width = `${Math.round(percent * 100)}%`;
+  dayProgressEl.title = `${Math.round((1 - percent) * 100)}% daylight remaining`;
 }
 
-/* ================== SVG arc animation & color helpers ================== */
-function animateArc(elem, percent, color) {
-  if (!elem) return;
-  elem.style.stroke = color || "var(--accent)";
-  // stroke-dasharray accepts "<value>, 100"
-  elem.setAttribute("stroke-dasharray", `${percent}, 100`);
-}
-
-function getUvColor(uvi) {
-  if (uvi <= 2) return "var(--good)";
-  if (uvi <= 5) return "var(--accent-2)";
-  if (uvi <= 7) return "var(--warn)";
-  return "var(--bad)";
-}
-function getAqiColor(aqi) {
-  if (aqi <= 50) return "var(--good)";
-  if (aqi <= 100) return "var(--accent-2)";
-  if (aqi <= 200) return "var(--warn)";
-  return "var(--bad)";
-}
-
-/* ================== Utilities ================== */
-function makeScrollable(el) {
-  if (!el) return;
-  let isDown = false, startX, scrollLeft;
-  el.addEventListener('mousedown', (e) => { isDown = true; el.classList.add('active-drag'); startX = e.pageX - el.offsetLeft; scrollLeft = el.scrollLeft; });
-  el.addEventListener('mouseleave', () => { isDown = false; el.classList.remove('active-drag'); });
-  el.addEventListener('mouseup', () => { isDown = false; el.classList.remove('active-drag'); });
-  el.addEventListener('mousemove', (e) => { if (!isDown) return; e.preventDefault(); const x = e.pageX - el.offsetLeft; const walk = (x - startX) * 1.5; el.scrollLeft = scrollLeft - walk; });
-}
-
-function showLoading(on) {
-  document.body.style.cursor = on ? "wait" : "default";
-}
-
-/* ================== Events ================== */
-if (locBtn) {
-  locBtn.addEventListener("click", () => {
-    if (!navigator.geolocation) { alert("Geolocation not supported"); return; }
-    navigator.geolocation.getCurrentPosition(async (pos) => {
-      const lat = pos.coords.latitude, lon = pos.coords.longitude;
-      try {
-        showLoading(true);
-        // your backend may support lat/lon query, try both
-        let res = await fetch(`${API_BASE}/weather?lat=${lat}&lon=${lon}`);
-        if (!res.ok) {
-          // fallback to text lat,lon param (if backend expects city param only)
-          res = await fetch(`${API_BASE}/weather?city=${lat},${lon}`);
-        }
-        if (!res.ok) throw new Error("Location fetch failed");
-        const data = await res.json();
-        applyWeatherData(data);
-      } catch (err) {
-        console.error("locBtn error:", err);
-        alert("Unable to fetch weather for current location.");
-      } finally {
-        showLoading(false);
-      }
-    }, () => alert("Location access denied or unavailable"));
-  });
-}
-
-if (refreshBtn) refreshBtn.addEventListener("click", () => { const last = localStorage.getItem("lastCity") || DEFAULT_CITY; fetchWeather(last); });
-if (backTopBtn) backTopBtn.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
-
-searchInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    const q = searchInput.value.trim() || DEFAULT_CITY;
-    fetchWeather(q);
-    autocompleteList.style.display = "none";
-  }
+// ======================= EVENTS ================================
+searchBtn.addEventListener("click", () => {
+  const city = searchInput.value.trim() || "Bhubaneswar";
+  getWeather(city);
+});
+searchInput.addEventListener("keyup", (e) => {
+  if (e.key === "Enter") getWeather(searchInput.value.trim() || "Bhubaneswar");
+});
+unitToggle.addEventListener("change", (e) => {
+  units = e.target.value;
+  getWeather(searchInput.value || "Bhubaneswar");
 });
 
-/* ================== Init ================== */
-(async function init() {
-  await loadConfigFromBackend(); // attempt to load RapidAPI key (optional)
-  const last = localStorage.getItem("lastCity") || DEFAULT_CITY;
-  // pre-fill input with last city for convenience
-  searchInput.value = last;
-  fetchWeather(last);
-})();
+// ======================= DEFAULT LOAD ===========================
+getWeather("Bhubaneswar");

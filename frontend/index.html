@@ -1,225 +1,92 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Modern Weather Dashboard</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Weather Dashboard</title>
 
-  <!-- Fonts & icons -->
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/weather-icons/2.0.10/css/weather-icons.min.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <!-- Styles -->
+  <link rel="stylesheet" href="styles.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
 
-  <!-- Chart.js -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-  <link rel="stylesheet" href="styles.css"/>
-</head>
-<body>
-  <div class="app-layout">
-    <!-- SIDEBAR -->
-    <aside class="sidebar">
-      <div class="brand">
-        <div class="logo">☀️</div>
-        <div class="brand-text">
-          <div class="brand-title">Weather</div>
-          <div class="brand-sub">Dashboard</div>
-        </div>
-      </div>
-
-      <nav class="nav">
-        <button class="nav-item" data-section="current"><i class="fa-solid fa-location-dot"></i><span>Current</span></button>
-        <button class="nav-item active" data-section="hourly"><i class="fa-solid fa-clock"></i><span>Hourly</span></button>
-        <button class="nav-item" data-section="details"><i class="fa-solid fa-list"></i><span>Details</span></button>
-        <button class="nav-item" data-section="maps"><i class="fa-solid fa-map"></i><span>Maps</span></button>
-        <button class="nav-item" data-section="monthly"><i class="fa-solid fa-calendar"></i><span>Monthly</span></button>
-        <button class="nav-item" data-section="trends"><i class="fa-solid fa-chart-line"></i><span>Trends</span></button>
-        <button class="nav-item" data-section="news"><i class="fa-solid fa-newspaper"></i><span>News</span></button>
-      </nav>
-
-      <div class="sidebar-actions">
-        <button id="refreshBtn" title="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
-        <button id="backTopBtn" title="Scroll to top"><i class="fa-solid fa-arrow-up"></i></button>
-        <label class="theme-switch">
-          <input type="checkbox" id="themeSwitch" />
-          <span class="switch-track"></span>
-        </label>
-      </div>
-    </aside>
-
-    <!-- MAIN -->
-    <main class="main">
-      <!-- header -->
-      <header class="header">
-        <div class="search-area">
-          <div class="search-box">
-            <i class="fa-solid fa-magnifying-glass"></i>
-            <input id="searchInput" placeholder="Search for location" autocomplete="off"/>
-            <div id="autocompleteList" class="autocomplete-list" aria-hidden="true"></div>
-          </div>
-          <button id="locBtn" class="btn"> <i class="fa-solid fa-location-crosshairs"></i> Current location</button>
-        </div>
-
-        <div class="header-right">
-          <div id="currentTempCompact" class="compact-temp">—°</div>
-        </div>
-      </header>
-
-      <section class="content">
-        <!-- Current summary -->
-        <section id="current" class="card summary-card">
-          <div class="summary-left">
-            <div class="location-row">
-              <div id="locationName" class="location">Bhubaneswar, Odisha, India</div>
-              <div id="summaryText" class="summary-text">Expect partly sunny skies.</div>
-            </div>
-
-            <div class="temp-row">
-              <div class="big-temp">
-                <div id="mainTemp" class="temp-value">—°</div>
-                <div class="temp-meta">
-                  <div id="mainIcon" class="main-icon"><i class="wi wi-day-sunny"></i></div>
-                  <div class="feels">Feels like <strong id="feelsLike">—°</strong></div>
-                </div>
-              </div>
-              <div id="keyMetrics" class="metrics-row">
-                <!-- small metric cards injected here -->
-              </div>
-            </div>
-          </div>
-
-          <div class="summary-right">
-            <div class="snapshot">
-              <div class="sn-label">Sunrise</div>
-              <div id="sunriseShort" class="sn-val">—:—</div>
-            </div>
-            <div class="snapshot">
-              <div class="sn-label">Sunset</div>
-              <div id="sunsetShort" class="sn-val">—:—</div>
-            </div>
-            <div class="snapshot">
-              <div class="sn-label">AQI</div>
-              <div id="aqiShort" class="sn-val">—</div>
-            </div>
-          </div>
-        </section>
-
-        <!-- hourly -->
-        <section id="hourly" class="card hourly-card">
-          <div class="card-header">
-            <h3>Hourly Forecast</h3>
-            <div class="header-actions">
-              <label class="switch-inline"><input type="checkbox" id="toggleFeels"> <span>Feels like</span></label>
-            </div>
-          </div>
-
-          <div id="hourlyCarousel" class="hourly-carousel" tabindex="0">
-            <!-- hourly items injected -->
-          </div>
-
-          <div class="chart-wrap">
-            <canvas id="tempChart" height="110"></canvas>
-            <div id="precipRow" class="precip-row"></div>
-          </div>
-        </section>
-
-        <!-- details grid -->
-        <section id="details" class="card-grid">
-          <div class="card small-card">
-            <h4>Temperature</h4>
-            <canvas id="miniTempChart" height="60"></canvas>
-            <div class="card-foot">Now: <strong id="tempNowSmall">—°</strong> • Status: <span id="tempStatus">—</span></div>
-          </div>
-
-          <div class="card small-card">
-            <h4>Feels Like</h4>
-            <div class="gauge-wrap">
-              <!-- feels difference gauge (SVG) -->
-              <svg viewBox="0 0 36 36" class="gauge-svg">
-                <path class="g-bg" d="M18 2.1 a 15.9 15.9 0 0 1 0 31.8 a 15.9 15.9 0 0 1 0 -31.8"></path>
-                <path id="feelsArc" class="g-arc" stroke-dasharray="0,100" d="M18 2.1 a 15.9 15.9 0 0 1 0 31.8 a 15.9 15.9 0 0 1 0 -31.8"></path>
-                <text x="18" y="20.35" class="g-text" id="feelsDiff">—°</text>
-              </svg>
-            </div>
-            <div class="card-foot">Difference between temp & feels</div>
-          </div>
-
-          <div class="card small-card">
-            <h4>Cloud Cover</h4>
-            <div class="circle-stat">
-              <svg viewBox="0 0 36 36" class="circular-chart">
-                <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
-                <path id="cloudArc" class="circle" stroke-dasharray="0,100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
-                <text x="18" y="20.35" class="percentage" id="cloudPct">0%</text>
-              </svg>
-            </div>
-          </div>
-
-          <div class="card small-card">
-            <h4>Precipitation</h4>
-            <div class="precip-total" id="precipTotal">— mm</div>
-            <div class="card-foot">Total & chance</div>
-          </div>
-
-          <div class="card small-card">
-            <h4>Wind</h4>
-            <div class="wind-gauge">
-              <div id="windCompass" class="wind-compass">
-                <div id="windDir" class="wind-dir">—</div>
-                <div id="windSpeed" class="wind-speed">— m/s</div>
-              </div>
-            </div>
-            <div class="card-foot">Direction & gusts</div>
-          </div>
-
-          <div class="card small-card">
-            <h4>Humidity</h4>
-            <div class="bar-wrap">
-              <div class="bar-bg"><div id="humidityBar" class="bar-fill" style="width:0%"></div></div>
-            </div>
-            <div class="card-foot">Dew point: <span id="dewPoint">—°</span></div>
-          </div>
-
-          <div class="card small-card">
-            <h4>UV Index</h4>
-            <div class="svg-gauge">
-              <svg viewBox="0 0 36 36" class="uv-svg">
-                <path class="g-bg" d="M18 2.1 a 15.9 15.9 0 0 1 0 31.8 a 15.9 15.9 0 0 1 0 -31.8"></path>
-                <path id="uvArc" class="g-arc" stroke-dasharray="0,100" d="M18 2.1 a 15.9 15.9 0 0 1 0 31.8 a 15.9 15.9 0 0 1 0 -31.8"></path>
-                <text x="18" y="20.35" class="g-text" id="uvIndex">—</text>
-              </svg>
-            </div>
-            <div class="card-foot">Sun protection guidance</div>
-          </div>
-
-          <div class="card small-card">
-            <h4>AQI</h4>
-            <div class="svg-gauge">
-              <svg viewBox="0 0 36 36" class="aqi-svg">
-                <path class="g-bg" d="M18 2.1 a 15.9 15.9 0 0 1 0 31.8 a 15.9 15.9 0 0 1 0 -31.8"></path>
-                <path id="aqiArc" class="g-arc" stroke-dasharray="0,100" d="M18 2.1 a 15.9 15.9 0 0 1 0 31.8 a 15.9 15.9 0 0 1 0 -31.8"></path>
-                <text x="18" y="20.35" class="g-text" id="aqiVal">—</text>
-              </svg>
-            </div>
-            <div class="card-foot">Air quality index</div>
-          </div>
-        </section>
-
-        <!-- maps -->
-        <section id="maps" class="card">
-          <h3>Maps</h3>
-          <div class="map-frame"><iframe id="mapFrame" loading="lazy" src=""></iframe></div>
-        </section>
-
-        <!-- news -->
-        <section id="news" class="card">
-          <h3>News & Alerts</h3>
-          <div id="newsList">No news</div>
-        </section>
-      </section>
-    </main>
-  </div>
-
+  <!-- Scripts -->
+  <script src="cities.js"></script>
   <script src="app.js" defer></script>
+</head>
+
+<body>
+  <div class="app">
+    <!-- Top Search Bar -->
+    <div class="top-bar">
+      <input type="text" id="searchInput" placeholder="Search your location" autocomplete="off"/>
+      <div id="suggestions" class="suggestions-box"></div>
+      <button id="searchBtn">🔍</button>
+      <select id="unitToggle">
+        <option value="metric">°C</option>
+        <option value="imperial">°F</option>
+      </select>
+    </div>
+
+    <!-- Current Weather -->
+    <div class="current-weather">
+      <div class="left">
+        <h2 id="dayName">Monday</h2>
+        <p id="date">16 Dec, 2025</p>
+        <h1 id="temperature">28°C</h1>
+        <p id="feelsLike">Feels like 30°</p>
+      </div>
+      <div class="right">
+        <div id="weatherIcon"></div>
+        <p id="weatherDesc">Mostly Cloudy</p>
+        <p>High: <span id="tempHigh">30</span>° | Low: <span id="tempLow">25</span>°</p>
+      </div>
+    </div>
+
+    <!-- Info Boxes + Map -->
+    <div class="info-row">
+      <div class="info-box">
+        <h3>Weather Stats</h3>
+        <div class="info-grid">
+          <p>Wind Speed 💨 <span id="wind">3.22 m/s</span></p>
+          <p>Pressure ⏱ <span id="pressure">1008 hPa</span></p>
+          <p>Humidity 💧 <span id="humidity">92%</span></p>
+          <p>Precipitation 🌧 <span id="precip">45%</span></p>
+        </div>
+      </div>
+
+      <div class="info-box">
+        <h3>Sunrise & Sunset</h3>
+        <p>🌅 Sunrise: <span id="sunrise">05:38 AM</span> &nbsp;&nbsp; 🌇 Sunset: <span id="sunset">05:32 PM</span></p>
+        <div class="progress-bar">
+          <div id="dayProgress"></div>
+        </div>
+      </div>
+
+      <div class="info-box map-box">
+        <h3>Location Map</h3>
+        <iframe id="map" width="100%" height="150" style="border:0;" loading="lazy"></iframe>
+      </div>
+    </div>
+
+    <!-- Suggestion Box -->
+    <div class="outside-box">
+      <h3>Should I go Outside?</h3>
+      <div id="outsideWrapper">
+        <span id="outsideEmoji">☀️</span>
+        <p id="outsideText">Yes, but don’t forget your umbrella ☔</p>
+      </div>
+    </div>
+
+    <!-- Forecast Sections -->
+    <div class="hourly">
+      <h3>Forecast Hourly</h3>
+      <div id="hourlyForecast" class="forecast-grid"></div>
+    </div>
+
+    <div class="weekly">
+      <h3>7 Days Weather</h3>
+      <div id="weeklyForecast" class="forecast-grid"></div>
+    </div>
+  </div>
 </body>
 </html>
